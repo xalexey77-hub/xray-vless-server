@@ -79,8 +79,8 @@ User created successfully.
 
 Name:       Ivan
 UUID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-Server:     31.77.10.63:443
-SNI:        www.google.com
+Server:     <SERVER_IP>:443
+SNI:        www.example.com
 Public key: <REALITY public key>
 Short ID:   <shortId>
 XHTTP path: /xhttp
@@ -89,6 +89,8 @@ XHTTP mode: auto
 VLESS URL:
 vless://...
 ```
+
+`<SERVER_IP>` — публичный IPv4-адрес вашего VPS. Он определяется скриптом автоматически и не должен быть записан в репозиторий.
 
 **UUID у каждого пользователя свой.** REALITY public key, shortId, SNI и XHTTP path общие для данного сервера.
 
@@ -103,7 +105,7 @@ sudo bash scripts/list-users.sh
 ```text
 NAME                    UUID
 -----------------------------------------------
-xhttp-main              5c72576c-ac50-406b-88de-b2d79b76c45d
+xhttp-main              xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 Ivan                    xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
@@ -141,7 +143,7 @@ sudo bash scripts/status.sh
 
 ### Восстановление ссылки существующего пользователя
 
-Если пользователь уже есть в `/usr/local/etc/xray/config.json`, но файл `/etc/xray-vless/users/<имя>.txt` отсутствует, повторный запуск `add-user.sh` с тем же именем не создаёт новый UUID. Скрипт использует существующую запись и восстанавливает файл с VLESS-ссылкой.
+Если пользователь уже есть в `/usr/local/etc/xray-vless/config.json` или `/usr/local/etc/xray/config.json`, но файл `/etc/xray-vless/users/<имя>.txt` отсутствует, повторный запуск `add-user.sh` с тем же именем не создаёт новый UUID. Скрипт использует существующую запись и восстанавливает файл с VLESS-ссылкой.
 
 Например:
 
