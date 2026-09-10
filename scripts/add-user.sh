@@ -29,7 +29,6 @@ command -v curl >/dev/null || { echo "ERROR: curl is required." >&2; exit 1; }
 mkdir -p "$USERS_DIR"
 chmod 700 "$USERS_DIR"
 
-# Read all client-independent connection parameters from the active 443 inbound.
 INBOUND_COUNT=$(jq '[.inbounds[] | select(.port == 443 and .protocol == "vless")] | length' "$CONFIG")
 [[ "$INBOUND_COUNT" -eq 1 ]] || {
   echo "ERROR: expected exactly one VLESS inbound on port 443, found $INBOUND_COUNT." >&2
@@ -41,12 +40,10 @@ PUBLIC_KEY="$({
   [[ -n "$PK" && "$PK" != "null" ]] || exit 1
   "$XRAY_BIN" x25519 -i "$PK"
 } | sed -n 's/^Password (PublicKey): //p')"
-
 SHORT_ID=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.realitySettings.shortIds[0]' "$CONFIG")
 SNI=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.realitySettings.serverNames[0]' "$CONFIG")
 PATH_VALUE=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.xhttpSettings.path' "$CONFIG")
 MODE=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.xhttpSettings.mode' "$CONFIG")
-
 SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 
 [[ -n "$SERVER_IP" ]] || { echo "ERROR: could not determine public IPv4 address." >&2; exit 1; }
@@ -58,9 +55,8 @@ SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true
 
 URL_PATH=$(printf '%s' "$PATH_VALUE" | jq -sRr @uri)
 
-# If the user already exists, do not create another UUID. Instead, repair/recreate
-# the local metadata file if it is missing. This also recovers users created by an
-# interrupted previous run of this script.
+# Existing users are not duplicated. If their metadata file is missing,
+# recreate it from the current server configuration.
 EXISTING_UUID=$(jq -r --arg name "$NAME" '
   .inbounds[]
   | select(.port == 443 and .protocol == "vless")
@@ -113,8 +109,6 @@ jq --arg uuid "$UUID" --arg name "$NAME" '
 
 "$XRAY_BIN" run -test -config "$TMP_CONFIG"
 
-# Install the tested configuration with permissions compatible with the official
-# Xray systemd service (User=nobody).
 cp "$TMP_CONFIG" "$CONFIG"
 chown root:nogroup "$CONFIG" 2>/dev/null || chown root:root "$CONFIG"
 chmod 640 "$CONFIG"
@@ -124,6 +118,7 @@ for candidate in xray.service xray-vless.service; do
   if systemctl cat "$candidate" >/dev/null 2>&1; then
     SERVICE="$candidate"
     break
+  fi
 done
 
 if [[ -z "$SERVICE" ]]; then
@@ -149,7 +144,6 @@ fi
 
 CLIENT_URL="vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=${URL_PATH}&mode=${MODE}#${NAME}"
 
-# Only persist the client file after the new Xray configuration is confirmed active.
 cat > "$USERS_DIR/${NAME}.txt" <<EOF
 Name: $NAME
 UUID: $UUID
@@ -158,7 +152,7 @@ EOF
 chmod 600 "$USERS_DIR/${NAME}.txt"
 
 echo
- echo "User created successfully."
+echo "User created successfully."
 echo
 echo "Name:       $NAME"
 echo "UUID:       $UUID"
