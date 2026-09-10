@@ -78,6 +78,7 @@ for candidate in xray.service xray-vless.service; do
   if systemctl cat "$candidate" >/dev/null 2>&1; then
     SERVICE="$candidate"
     break
+  fi
 done
 [[ -n "$SERVICE" ]] || { cp "$BACKUP" "$CONFIG"; echo "ERROR: Xray systemd service not found." >&2; exit 1; }
 
