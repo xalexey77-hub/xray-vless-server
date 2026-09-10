@@ -24,6 +24,7 @@ fi
 [[ -x "$XRAY_BIN" ]] || { echo "ERROR: Xray not found: $XRAY_BIN" >&2; exit 1; }
 [[ -f "$CONFIG" ]] || { echo "ERROR: config not found: $CONFIG" >&2; exit 1; }
 command -v jq >/dev/null || { echo "ERROR: jq is required." >&2; exit 1; }
+command -v curl >/dev/null || { echo "ERROR: curl is required." >&2; exit 1; }
 
 mkdir -p "$USERS_DIR"
 chmod 700 "$USERS_DIR"
@@ -42,8 +43,9 @@ SHORT_ID=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySe
 SNI=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.serverNames[0]' "$CONFIG")
 PATH_VALUE=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.xhttpSettings.path' "$CONFIG")
 MODE=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.xhttpSettings.mode' "$CONFIG")
-HOST=$(hostname -f 2>/dev/null || hostname)
+SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 
+[[ -n "$SERVER_IP" ]] || { echo "ERROR: could not determine public IPv4 address." >&2; exit 1; }
 [[ -n "$PUBLIC_KEY" && "$PUBLIC_KEY" != "null" ]] || { echo "ERROR: could not derive REALITY public key." >&2; exit 1; }
 [[ -n "$SHORT_ID" && "$SHORT_ID" != "null" ]] || { echo "ERROR: REALITY shortId not found." >&2; exit 1; }
 [[ -n "$SNI" && "$SNI" != "null" ]] || { echo "ERROR: REALITY serverName not found." >&2; exit 1; }
@@ -93,7 +95,7 @@ if [[ "$(systemctl is-active "$SERVICE")" != "active" ]]; then
 fi
 
 URL_PATH=$(printf '%s' "$PATH_VALUE" | jq -sRr @uri)
-CLIENT_URL="vless://${UUID}@${HOST}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=${URL_PATH}&mode=${MODE}#${NAME}"
+CLIENT_URL="vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=${URL_PATH}&mode=${MODE}#${NAME}"
 
 cat > "$USERS_DIR/${NAME}.txt" <<EOF
 Name: $NAME
@@ -108,7 +110,7 @@ User created successfully.
 
 Name:       $NAME
 UUID:       $UUID
-Server:     $HOST:$PORT
+Server:     $SERVER_IP:$PORT
 SNI:        $SNI
 Public key: $PUBLIC_KEY
 Short ID:   $SHORT_ID
