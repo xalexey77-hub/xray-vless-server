@@ -51,7 +51,9 @@ SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true
 [[ -n "$SNI" && "$SNI" != "null" ]] || { echo "ERROR: REALITY serverName not found." >&2; exit 1; }
 [[ -n "$PATH_VALUE" && "$PATH_VALUE" != "null" ]] || { echo "ERROR: XHTTP path not found." >&2; exit 1; }
 
-TMP_CONFIG=$(mktemp)
+# Xray determines config format from the file extension when --config/-config is used.
+# mktemp without a suffix creates a file with no extension, which makes Xray reject it.
+TMP_CONFIG=$(mktemp --suffix=.json)
 BACKUP="$DATA_DIR/config.backup.$(date +%Y%m%d-%H%M%S).json"
 trap 'rm -f "$TMP_CONFIG"' EXIT
 
@@ -76,7 +78,6 @@ for candidate in xray.service xray-vless.service; do
   if systemctl cat "$candidate" >/dev/null 2>&1; then
     SERVICE="$candidate"
     break
-  fi
 done
 [[ -n "$SERVICE" ]] || { cp "$BACKUP" "$CONFIG"; echo "ERROR: Xray systemd service not found." >&2; exit 1; }
 
