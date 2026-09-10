@@ -38,6 +38,119 @@ sudo bash install.sh
 
 После установки скрипт покажет VLESS URL. Его можно импортировать в клиент, поддерживающий VLESS + XHTTP + REALITY.
 
+## Быстрое управление пользователями
+
+Все команды выполняются на сервере из каталога проекта:
+
+```bash
+cd /root/xray-vless-server
+```
+
+### 1. Добавить пользователя
+
+Например, создать пользователя `Ivan`:
+
+```bash
+sudo bash scripts/add-user.sh Ivan
+```
+
+Или:
+
+```bash
+sudo bash scripts/add-user.sh friend1
+```
+
+Скрипт автоматически:
+
+1. генерирует отдельный UUID;
+2. добавляет пользователя в VLESS inbound на TCP/443;
+3. сохраняет резервную копию текущей конфигурации;
+4. проверяет новый JSON через Xray;
+5. устанавливает конфигурацию;
+6. перезапускает Xray;
+7. проверяет, что Xray успешно запущен;
+8. формирует готовую VLESS-ссылку;
+9. сохраняет её в `/etc/xray-vless/users/<имя>.txt`.
+
+Пример результата:
+
+```text
+User created successfully.
+
+Name:       Ivan
+UUID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+Server:     31.77.10.63:443
+SNI:        www.google.com
+Public key: <REALITY public key>
+Short ID:   <shortId>
+XHTTP path: /xhttp
+XHTTP mode: auto
+
+VLESS URL:
+vless://...
+```
+
+**UUID у каждого пользователя свой.** REALITY public key, shortId, SNI и XHTTP path общие для данного сервера.
+
+### 2. Получить список пользователей
+
+```bash
+sudo bash scripts/list-users.sh
+```
+
+Пример:
+
+```text
+NAME                    UUID
+-----------------------------------------------
+xhttp-main              5c72576c-ac50-406b-88de-b2d79b76c45d
+Ivan                    xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+### 3. Получить VLESS-ссылку пользователя
+
+После создания ссылка сохраняется в отдельном файле:
+
+```bash
+sudo cat /etc/xray-vless/users/Ivan.txt
+```
+
+Для пользователя `friend1`:
+
+```bash
+sudo cat /etc/xray-vless/users/friend1.txt
+```
+
+В файле находится UUID и готовая VLESS URL, которую можно импортировать в клиент.
+
+### 4. Удалить пользователя
+
+```bash
+sudo bash scripts/remove-user.sh Ivan
+```
+
+Скрипт удаляет UUID пользователя из VLESS-конфигурации, проверяет конфигурацию, перезапускает Xray и при ошибке выполняет откат.
+
+Скрипт не позволит удалить последнего пользователя, чтобы не оставить VLESS inbound без действующего UUID.
+
+### 5. Проверить состояние Xray
+
+```bash
+sudo bash scripts/status.sh
+```
+
+### Восстановление ссылки существующего пользователя
+
+Если пользователь уже есть в `/usr/local/etc/xray/config.json`, но файл `/etc/xray-vless/users/<имя>.txt` отсутствует, повторный запуск `add-user.sh` с тем же именем не создаёт новый UUID. Скрипт использует существующую запись и восстанавливает файл с VLESS-ссылкой.
+
+Например:
+
+```bash
+sudo bash scripts/add-user.sh Nino
+```
+
+Если `Nino` уже существует, новый UUID не создаётся.
+
 ## Проверка
 
 ```bash
@@ -62,43 +175,23 @@ sudo journalctl -u xray.service -f
 sudo /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
 ```
 
-## Управление пользователями
+## Как передать VLESS пользователю
 
-Каждый пользователь получает отдельный UUID. REALITY public key, shortId, SNI и XHTTP параметры остаются общими для сервера.
-
-### Добавить пользователя
+После создания пользователя получите его ссылку:
 
 ```bash
-sudo bash scripts/add-user.sh friend1
+sudo cat /etc/xray-vless/users/Ivan.txt
 ```
 
-Скрипт:
+Передайте пользователю строку, начинающуюся с:
 
-- генерирует новый UUID;
-- добавляет пользователя в VLESS inbound на `443`;
-- проверяет конфигурацию Xray;
-- создаёт резервную копию конфигурации;
-- перезапускает Xray и проверяет его состояние;
-- выводит готовую VLESS-ссылку;
-- сохраняет ссылку в `/etc/xray-vless/users/friend1.txt`.
-
-### Посмотреть пользователей
-
-```bash
-sudo bash scripts/list-users.sh
+```text
+vless://
 ```
 
-### Удалить пользователя
+Не передавайте содержимое `REALITY private key`. Приватный ключ сервера хранится только на сервере.
 
-```bash
-sudo bash scripts/remove-user.sh friend1
-```
-
-Скрипт не позволит удалить последнего пользователя, чтобы не оставить VLESS без действующего UUID.
-
-### Важная особенность
-
-VLESS URL содержит UUID пользователя и публичные параметры подключения. Его можно передавать пользователю, которому предоставляется доступ. **REALITY private key сервера никогда не передаётся клиентам и не публикуется в Git.**
+Пользователь может импортировать VLESS URL в совместимый Xray-клиент, например через импорт ссылки из буфера обмена.
 
 ## Файлы на сервере
 
