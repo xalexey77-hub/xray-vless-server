@@ -29,20 +29,24 @@ command -v curl >/dev/null || { echo "ERROR: curl is required." >&2; exit 1; }
 mkdir -p "$USERS_DIR"
 chmod 700 "$USERS_DIR"
 
-if jq -e --arg name "$NAME" '.inbounds[] | select(.port == 443) | .settings.clients[]? | select(.email == $name)' "$CONFIG" >/dev/null; then
-  echo "ERROR: user '$NAME' already exists." >&2
+# Read all client-independent connection parameters from the active 443 inbound.
+INBOUND_COUNT=$(jq '[.inbounds[] | select(.port == 443 and .protocol == "vless")] | length' "$CONFIG")
+[[ "$INBOUND_COUNT" -eq 1 ]] || {
+  echo "ERROR: expected exactly one VLESS inbound on port 443, found $INBOUND_COUNT." >&2
   exit 1
-fi
+}
 
-UUID="$($XRAY_BIN uuid)"
 PUBLIC_KEY="$({
-  PK=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.privateKey' "$CONFIG")
+  PK=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.realitySettings.privateKey' "$CONFIG")
+  [[ -n "$PK" && "$PK" != "null" ]] || exit 1
   "$XRAY_BIN" x25519 -i "$PK"
 } | sed -n 's/^Password (PublicKey): //p')"
-SHORT_ID=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.shortIds[0]' "$CONFIG")
-SNI=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.realitySettings.serverNames[0]' "$CONFIG")
-PATH_VALUE=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.xhttpSettings.path' "$CONFIG")
-MODE=$(jq -r '.inbounds[] | select(.port == 443) | .streamSettings.xhttpSettings.mode' "$CONFIG")
+
+SHORT_ID=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.realitySettings.shortIds[0]' "$CONFIG")
+SNI=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.realitySettings.serverNames[0]' "$CONFIG")
+PATH_VALUE=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.xhttpSettings.path' "$CONFIG")
+MODE=$(jq -r '.inbounds[] | select(.port == 443 and .protocol == "vless") | .streamSettings.xhttpSettings.mode' "$CONFIG")
+
 SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 
 [[ -n "$SERVER_IP" ]] || { echo "ERROR: could not determine public IPv4 address." >&2; exit 1; }
@@ -50,9 +54,49 @@ SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true
 [[ -n "$SHORT_ID" && "$SHORT_ID" != "null" ]] || { echo "ERROR: REALITY shortId not found." >&2; exit 1; }
 [[ -n "$SNI" && "$SNI" != "null" ]] || { echo "ERROR: REALITY serverName not found." >&2; exit 1; }
 [[ -n "$PATH_VALUE" && "$PATH_VALUE" != "null" ]] || { echo "ERROR: XHTTP path not found." >&2; exit 1; }
+[[ -n "$MODE" && "$MODE" != "null" ]] || { echo "ERROR: XHTTP mode not found." >&2; exit 1; }
 
-# Xray determines config format from the file extension when --config/-config is used.
-# mktemp without a suffix creates a file with no extension, which makes Xray reject it.
+URL_PATH=$(printf '%s' "$PATH_VALUE" | jq -sRr @uri)
+
+# If the user already exists, do not create another UUID. Instead, repair/recreate
+# the local metadata file if it is missing. This also recovers users created by an
+# interrupted previous run of this script.
+EXISTING_UUID=$(jq -r --arg name "$NAME" '
+  .inbounds[]
+  | select(.port == 443 and .protocol == "vless")
+  | .settings.clients[]?
+  | select(.email == $name)
+  | .id
+' "$CONFIG" | head -n1)
+
+if [[ -n "$EXISTING_UUID" && "$EXISTING_UUID" != "null" ]]; then
+  CLIENT_URL="vless://${EXISTING_UUID}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=${URL_PATH}&mode=${MODE}#${NAME}"
+
+  cat > "$USERS_DIR/${NAME}.txt" <<EOF
+Name: $NAME
+UUID: $EXISTING_UUID
+VLESS URL: $CLIENT_URL
+EOF
+  chmod 600 "$USERS_DIR/${NAME}.txt"
+
+  echo
+  echo "User already exists. Metadata file has been created/refreshed."
+  echo
+  echo "Name:       $NAME"
+  echo "UUID:       $EXISTING_UUID"
+  echo "Server:     $SERVER_IP:$PORT"
+  echo "SNI:        $SNI"
+  echo "Public key: $PUBLIC_KEY"
+  echo "Short ID:   $SHORT_ID"
+  echo "XHTTP path: $PATH_VALUE"
+  echo "XHTTP mode: $MODE"
+  echo
+  echo "VLESS URL:"
+  echo "$CLIENT_URL"
+  exit 0
+fi
+
+UUID="$($XRAY_BIN uuid)"
 TMP_CONFIG=$(mktemp --suffix=.json)
 BACKUP="$DATA_DIR/config.backup.$(date +%Y%m%d-%H%M%S).json"
 trap 'rm -f "$TMP_CONFIG"' EXIT
@@ -61,7 +105,7 @@ cp -a "$CONFIG" "$BACKUP"
 
 jq --arg uuid "$UUID" --arg name "$NAME" '
   .inbounds |= map(
-    if .port == 443 then
+    if .port == 443 and .protocol == "vless" then
       .settings.clients += [{"id": $uuid, "email": $name}]
     else . end
   )
@@ -69,6 +113,8 @@ jq --arg uuid "$UUID" --arg name "$NAME" '
 
 "$XRAY_BIN" run -test -config "$TMP_CONFIG"
 
+# Install the tested configuration with permissions compatible with the official
+# Xray systemd service (User=nobody).
 cp "$TMP_CONFIG" "$CONFIG"
 chown root:nogroup "$CONFIG" 2>/dev/null || chown root:root "$CONFIG"
 chmod 640 "$CONFIG"
@@ -78,9 +124,13 @@ for candidate in xray.service xray-vless.service; do
   if systemctl cat "$candidate" >/dev/null 2>&1; then
     SERVICE="$candidate"
     break
-  fi
 done
-[[ -n "$SERVICE" ]] || { cp "$BACKUP" "$CONFIG"; echo "ERROR: Xray systemd service not found." >&2; exit 1; }
+
+if [[ -z "$SERVICE" ]]; then
+  cp "$BACKUP" "$CONFIG"
+  echo "ERROR: Xray systemd service not found. Configuration rolled back." >&2
+  exit 1
+fi
 
 if ! systemctl restart "$SERVICE"; then
   cp "$BACKUP" "$CONFIG"
@@ -88,6 +138,7 @@ if ! systemctl restart "$SERVICE"; then
   echo "ERROR: Xray restart failed. Configuration rolled back." >&2
   exit 1
 fi
+
 sleep 1
 if [[ "$(systemctl is-active "$SERVICE")" != "active" ]]; then
   cp "$BACKUP" "$CONFIG"
@@ -96,9 +147,9 @@ if [[ "$(systemctl is-active "$SERVICE")" != "active" ]]; then
   exit 1
 fi
 
-URL_PATH=$(printf '%s' "$PATH_VALUE" | jq -sRr @uri)
 CLIENT_URL="vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=xhttp&path=${URL_PATH}&mode=${MODE}#${NAME}"
 
+# Only persist the client file after the new Xray configuration is confirmed active.
 cat > "$USERS_DIR/${NAME}.txt" <<EOF
 Name: $NAME
 UUID: $UUID
@@ -106,22 +157,20 @@ VLESS URL: $CLIENT_URL
 EOF
 chmod 600 "$USERS_DIR/${NAME}.txt"
 
-cat <<EOF
-
-User created successfully.
-
-Name:       $NAME
-UUID:       $UUID
-Server:     $SERVER_IP:$PORT
-SNI:        $SNI
-Public key: $PUBLIC_KEY
-Short ID:   $SHORT_ID
-XHTTP path: $PATH_VALUE
-XHTTP mode: $MODE
-
-VLESS URL:
-$CLIENT_URL
-
-Backup:
-$BACKUP
-EOF
+echo
+ echo "User created successfully."
+echo
+echo "Name:       $NAME"
+echo "UUID:       $UUID"
+echo "Server:     $SERVER_IP:$PORT"
+echo "SNI:        $SNI"
+echo "Public key: $PUBLIC_KEY"
+echo "Short ID:   $SHORT_ID"
+echo "XHTTP path: $PATH_VALUE"
+echo "XHTTP mode: $MODE"
+echo
+echo "VLESS URL:"
+echo "$CLIENT_URL"
+echo
+echo "Backup:"
+echo "$BACKUP"
