@@ -1,0 +1,13 @@
+# Runtime secrets and generated configuration
+.env
+*.key
+server.env
+client.json
+client.txt
+config.json
+*.log
+
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
