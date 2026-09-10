@@ -2,7 +2,7 @@
 
 Автоматическая установка собственного VLESS-сервера на Ubuntu с транспортом **XHTTP** и защитой **REALITY**.
 
-Проект рассчитан на собственный VPS и предназначен для подключения к нему с Xray-клиентов. Он не хранит UUID и REALITY private key в GitHub: эти данные генерируются непосредственно на сервере.
+Проект рассчитан на собственный VPS и предназначен для подключения к нему с Xray-клиентов. Секретные параметры сервера генерируются непосредственно на сервере и не должны попадать в Git.
 
 ## Что устанавливается
 
@@ -10,7 +10,7 @@
 - VLESS inbound на TCP/443
 - XHTTP transport
 - REALITY
-- systemd service `xray-vless.service`
+- systemd service Xray
 - автоматическая генерация UUID, REALITY key pair и shortId
 - UFW rule для TCP/443, если UFW уже активен
 - VLESS URL и JSON-параметры клиента
@@ -27,7 +27,7 @@
 ```bash
 git clone https://github.com/xalexey77-hub/xray-vless-server.git
 cd xray-vless-server
-sudo ./install.sh
+sudo bash install.sh
 ```
 
 Установщик спросит:
@@ -41,19 +41,19 @@ sudo ./install.sh
 ## Проверка
 
 ```bash
-sudo ./scripts/status.sh
+sudo bash scripts/status.sh
 ```
 
-Получить клиентские параметры повторно:
+Получить основной клиентский профиль повторно:
 
 ```bash
-sudo ./scripts/show-client-config.sh
+sudo bash scripts/show-client-config.sh
 ```
 
 Логи:
 
 ```bash
-sudo journalctl -u xray-vless.service -f
+sudo journalctl -u xray.service -f
 ```
 
 Проверка конфигурации:
@@ -62,20 +62,58 @@ sudo journalctl -u xray-vless.service -f
 sudo /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
 ```
 
+## Управление пользователями
+
+Каждый пользователь получает отдельный UUID. REALITY public key, shortId, SNI и XHTTP параметры остаются общими для сервера.
+
+### Добавить пользователя
+
+```bash
+sudo bash scripts/add-user.sh friend1
+```
+
+Скрипт:
+
+- генерирует новый UUID;
+- добавляет пользователя в VLESS inbound на `443`;
+- проверяет конфигурацию Xray;
+- создаёт резервную копию конфигурации;
+- перезапускает Xray и проверяет его состояние;
+- выводит готовую VLESS-ссылку;
+- сохраняет ссылку в `/etc/xray-vless/users/friend1.txt`.
+
+### Посмотреть пользователей
+
+```bash
+sudo bash scripts/list-users.sh
+```
+
+### Удалить пользователя
+
+```bash
+sudo bash scripts/remove-user.sh friend1
+```
+
+Скрипт не позволит удалить последнего пользователя, чтобы не оставить VLESS без действующего UUID.
+
+### Важная особенность
+
+VLESS URL содержит UUID пользователя и публичные параметры подключения. Его можно передавать пользователю, которому предоставляется доступ. **REALITY private key сервера никогда не передаётся клиентам и не публикуется в Git.**
+
 ## Файлы на сервере
 
 - `/usr/local/etc/xray/config.json` — конфигурация Xray
 - `/etc/xray-vless/server.env` — секретные параметры сервера
-- `/etc/xray-vless/client.json` — параметры клиента
-- `/etc/xray-vless/client.txt` — VLESS URL
-- `/etc/systemd/system/xray-vless.service` — systemd unit
+- `/etc/xray-vless/client.json` — параметры основного клиента
+- `/etc/xray-vless/client.txt` — VLESS URL основного клиента
+- `/etc/xray-vless/users/` — индивидуальные VLESS-ссылки пользователей
 
 Эти файлы с секретами не должны попадать в Git.
 
 ## Удаление
 
 ```bash
-sudo ./scripts/uninstall.sh
+sudo bash scripts/uninstall.sh
 ```
 
 Скрипт запросит подтверждение `yes` перед удалением.
@@ -84,4 +122,4 @@ sudo ./scripts/uninstall.sh
 
 REALITY/XHTTP не гарантирует работу в любой сети: эффективность зависит от текущих методов фильтрации и блокировок. Перед использованием необходимо убедиться, что выбранный `serverName` действительно соответствует TLS-сертификату и поддерживает необходимые параметры TLS.
 
-Конфигурация проекта намеренно минимальная. Дополнительные XHTTP tuning-параметры, несколько пользователей, маршрутизацию и альтернативные профили можно добавить позже.
+Конфигурация проекта намеренно минимальная. Скрипты управления несколькими VLESS-пользователями включены в проект.
