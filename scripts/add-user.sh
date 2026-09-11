@@ -5,6 +5,7 @@ XRAY_BIN="/usr/local/bin/xray"
 CONFIG="/usr/local/etc/xray/config.json"
 DATA_DIR="/etc/xray-vless"
 USERS_DIR="$DATA_DIR/users"
+QR_DIR="$DATA_DIR/qr"
 PORT=443
 
 usage() {
@@ -55,6 +56,19 @@ SERVER_IP="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true
 
 URL_PATH=$(printf '%s' "$PATH_VALUE" | jq -sRr @uri)
 
+make_qr() {
+  local url="$1"
+  if command -v qrencode >/dev/null 2>&1; then
+    mkdir -p "$QR_DIR"
+    chmod 700 "$QR_DIR"
+    qrencode -o "$QR_DIR/${NAME}.png" -s 8 -m 2 "$url"
+    chmod 600 "$QR_DIR/${NAME}.png"
+    echo "QR PNG:    $QR_DIR/${NAME}.png"
+  else
+    echo "QR PNG:    not created (qrencode is not installed)"
+  fi
+}
+
 # Existing users are not duplicated. If their metadata file is missing,
 # recreate it from the current server configuration.
 EXISTING_UUID=$(jq -r --arg name "$NAME" '
@@ -74,6 +88,7 @@ UUID: $EXISTING_UUID
 VLESS URL: $CLIENT_URL
 EOF
   chmod 600 "$USERS_DIR/${NAME}.txt"
+  make_qr "$CLIENT_URL"
 
   echo
   echo "User already exists. Metadata file has been created/refreshed."
@@ -150,6 +165,7 @@ UUID: $UUID
 VLESS URL: $CLIENT_URL
 EOF
 chmod 600 "$USERS_DIR/${NAME}.txt"
+make_qr "$CLIENT_URL"
 
 echo
 echo "User created successfully."
