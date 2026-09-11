@@ -31,7 +31,7 @@ if [[ "$COUNT" -le 1 ]]; then
   exit 1
 fi
 
-TMP_CONFIG=$(mktemp)
+TMP_CONFIG=$(mktemp --suffix=.json)
 BACKUP="$DATA_DIR/config.backup.$(date +%Y%m%d-%H%M%S).json"
 trap 'rm -f "$TMP_CONFIG"' EXIT
 
