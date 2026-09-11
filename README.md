@@ -7,11 +7,12 @@
 ## Что устанавливается
 
 - Xray-core из официального установщика Xray
+- официальный systemd service `xray.service`
 - VLESS inbound на TCP/443
 - XHTTP transport
 - REALITY
-- systemd service Xray
 - автоматическая генерация UUID, REALITY key pair и shortId
+- конфигурация `root:nogroup 640`, доступная сервису Xray `nobody:nogroup`
 - UFW rule для TCP/443, если UFW уже активен
 - VLESS URL и JSON-параметры клиента
 
@@ -24,11 +25,25 @@
 
 ## Установка
 
+### Вариант 1 — через Git
+
 ```bash
 git clone https://github.com/xalexey77-hub/xray-vless-server.git
 cd xray-vless-server
 sudo bash install.sh
 ```
+
+### Вариант 2 — одной командой
+
+Для чистого VPS можно скачать установщик и сразу запустить его:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xalexey77-hub/xray-vless-server/main/install.sh -o /tmp/xray-vless-install.sh && sudo bash /tmp/xray-vless-install.sh
+```
+
+Перед запуском скачанного скрипта рекомендуется просмотреть его содержимое и убедиться, что используется доверенный commit/репозиторий.
+
+Установщик использует **официальный `xray.service`**, а не отдельный пользовательский systemd unit. Это важно для корректных capabilities и запуска Xray от `nobody` на TCP/443.
 
 Установщик спросит:
 
@@ -72,6 +87,8 @@ sudo bash scripts/add-user.sh friend1
 8. формирует готовую VLESS-ссылку;
 9. сохраняет её в `/etc/xray-vless/users/<имя>.txt`.
 
+Если пользователь уже есть в конфигурации, а его `.txt` отсутствует, скрипт не создаёт новый UUID и не дублирует пользователя, а восстанавливает файл с текущими параметрами.
+
 ### 2. Получить список пользователей
 
 ```bash
@@ -112,7 +129,7 @@ sudo bash scripts/status.sh
 
 ### Windows / macOS / Linux
 
-Можно использовать клиенты на базе Xray-core или sing-box, если они поддерживают VLESS + XHTTP + REALITY. Для Windows ранее проверена работа профиля в **v2rayN** с Xray-core.
+Можно использовать клиенты на базе Xray-core или sing-box, если они поддерживают VLESS + XHTTP + REALITY. Для Windows проверена работа профиля в **v2rayN** с Xray-core.
 
 ### Краткая таблица
 
@@ -131,7 +148,7 @@ sudo bash scripts/status.sh
 
 Цель этого раздела — уменьшить поверхность атаки и сделать сервер устойчивее к обычным сетевым сбоям и ошибкам администрирования. Это **не является гарантией обнаружения или необнаружения VPN-трафика** и не обещает обход конкретных систем блокировки.
 
-### Базовое hardening
+### Базовый hardening
 
 Скрипт `scripts/harden.sh`:
 
