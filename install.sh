@@ -7,13 +7,13 @@ DATA_DIR="/etc/xray-vless"
 CONFIG="${XRAY_DIR}/config.json"
 ENV_FILE="${DATA_DIR}/server.env"
 CLIENT_FILE="${DATA_DIR}/client.json"
-SERVICE="xray-vless.service"
+SERVICE="xray.service"
 
 log(){ echo "[+] $*"; }
 warn(){ echo "[!] $*" >&2; }
 die(){ echo "[ERROR] $*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "Запустите скрипт от root: sudo ./install.sh"
+[[ $EUID -eq 0 ]] || die "Запустите скрипт от root: sudo bash install.sh"
 command -v apt-get >/dev/null || die "Поддерживается Ubuntu/Debian с apt-get."
 
 if [[ -f /etc/os-release ]]; then
@@ -39,19 +39,28 @@ if ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)443$|\]:443$'; then
   die "TCP/443 уже занят. Освободите порт 443 или остановите сервис, который его использует."
 fi
 
-if [[ ! -x "$XRAY_BIN" ]]; then
-  log "Установка Xray из официального установщика"
+log "Установка Xray из официального установщика"
+if [[ ! -x "$XRAY_BIN" ]] || [[ ! -f /etc/systemd/system/xray.service ]]; then
   tmp="$(mktemp)"
   trap 'rm -f "$tmp"' EXIT
   curl -fsSL https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh -o "$tmp"
-  bash "$tmp" install
+  bash "$tmp" install -u nobody
+  rm -f "$tmp"
+  trap - EXIT
 fi
 
 [[ -x "$XRAY_BIN" ]] || die "Xray не установлен в $XRAY_BIN"
+[[ -f /etc/systemd/system/xray.service ]] || die "Официальный systemd unit xray.service не найден."
+
+# Disable the old custom unit if it exists. The official installer/service is used.
+if systemctl cat xray-vless.service >/dev/null 2>&1; then
+  log "Отключение старого xray-vless.service"
+  systemctl disable --now xray-vless.service 2>/dev/null || true
+fi
 
 log "Настройка параметров сервера"
-read -r -p "REALITY serverName [www.cloudflare.com]: " SERVER_NAME
-SERVER_NAME="${SERVER_NAME:-www.cloudflare.com}"
+read -r -p "REALITY serverName [www.google.com]: " SERVER_NAME
+SERVER_NAME="${SERVER_NAME:-www.google.com}"
 
 read -r -p "REALITY destination [${SERVER_NAME}:443]: " DEST
 DEST="${DEST:-${SERVER_NAME}:443}"
@@ -64,13 +73,13 @@ UUID="$($XRAY_BIN uuid)"
 [[ -n "$UUID" ]] || die "Не удалось сгенерировать UUID"
 
 KEY_OUTPUT="$($XRAY_BIN x25519 2>&1)" || die "Не удалось сгенерировать REALITY key pair: $KEY_OUTPUT"
-PRIVATE_KEY="$(printf '%s\n' "$KEY_OUTPUT" | awk -F': *' '/^[Pp]rivate[Kk]ey:/ {print $2; exit}')"
-PUBLIC_KEY="$(printf '%s\n' "$KEY_OUTPUT" | awk -F': *' '/^[Pp]ublic[Kk]ey:/ {print $2; exit}')"
+PRIVATE_KEY="$(printf '%s\n' "$KEY_OUTPUT" | sed -n 's/^PrivateKey: //p' | head -n1)"
+PUBLIC_KEY="$(printf '%s\n' "$KEY_OUTPUT" | sed -n 's/^Password (PublicKey): //p' | head -n1)"
 
-# Some Xray versions use Password instead of PublicKey for the public key.
-if [[ -z "$PUBLIC_KEY" ]]; then
-  PUBLIC_KEY="$(printf '%s\n' "$KEY_OUTPUT" | awk -F': *' '/^[Pp]assword:/ {print $2; exit}')"
-fi
+# Compatibility with Xray versions that print a plain PublicKey/Password label.
+[[ -n "$PRIVATE_KEY" ]] || PRIVATE_KEY="$(printf '%s\n' "$KEY_OUTPUT" | sed -n 's/^Private Key: //p' | head -n1)"
+[[ -n "$PUBLIC_KEY" ]] || PUBLIC_KEY="$(printf '%s\n' "$KEY_OUTPUT" | sed -n 's/^PublicKey: //p' | head -n1)"
+[[ -n "$PUBLIC_KEY" ]] || PUBLIC_KEY="$(printf '%s\n' "$KEY_OUTPUT" | sed -n 's/^Password: //p' | head -n1)"
 
 [[ -n "$PRIVATE_KEY" && -n "$PUBLIC_KEY" ]] || die "Не удалось разобрать вывод 'xray x25519': $KEY_OUTPUT"
 
@@ -136,7 +145,9 @@ cat > "$CONFIG" <<EOF
 }
 EOF
 
-chmod 600 "$CONFIG"
+# The official xray.service runs as nobody:nogroup, so it must be able to read config.json.
+chown root:nogroup "$CONFIG" 2>/dev/null || chown root:root "$CONFIG"
+chmod 640 "$CONFIG"
 
 cat > "$ENV_FILE" <<EOF
 UUID=${UUID}
@@ -167,26 +178,6 @@ cat > "$CLIENT_FILE" <<EOF
 }
 EOF
 chmod 600 "$CLIENT_FILE"
-
-cat > "/etc/systemd/system/${SERVICE}" <<EOF
-[Unit]
-Description=Xray VLESS XHTTP REALITY Server
-After=network-online.target nss-lookup.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=nobody
-Group=nogroup
-ExecStart=${XRAY_BIN} run -config ${CONFIG}
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=1048576
-NoNewPrivileges=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
 
 log "Проверка конфигурации Xray"
 "$XRAY_BIN" run -test -config "$CONFIG"
@@ -250,4 +241,4 @@ echo "VLESS URL:"
 echo "${VLESS_URI}"
 echo ""
 echo "Скопируйте VLESS URL в клиент Xray/sing-box, поддерживающий XHTTP + REALITY."
-echo "После установки: sudo ./scripts/status.sh"
+echo "После установки: sudo bash scripts/status.sh"
