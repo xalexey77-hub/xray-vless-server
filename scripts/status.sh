@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SERVICE="xray-vless.service"
+SERVICE="xray.service"
 CONFIG="/usr/local/etc/xray/config.json"
 ENV_FILE="/etc/xray-vless/server.env"
 CLIENT_FILE="/etc/xray-vless/client.json"
@@ -25,5 +25,6 @@ if [[ -r "$ENV_FILE" ]]; then
 fi
 
 echo
+echo "Config     : $CONFIG"
 echo "Client JSON: $CLIENT_FILE"
-echo "VLESS URL : $CLIENT_TXT"
+echo "VLESS URL  : $CLIENT_TXT"
